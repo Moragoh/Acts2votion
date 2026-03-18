@@ -38,10 +38,10 @@ struct DevotionalView: View {
                         .font(.custom("Georgia", size: 20))
                         .fontWeight(.semibold)
                         .foregroundStyle(.primary)
-                        .padding(.bottom, 20)
+                        .padding(.bottom, 10)
 
                     Divider()
-                        .padding(.bottom, 24)
+                        .padding(.bottom, 10)
 
                     if isMemoryVerse(devotional) {
                         memoryVerseBody(devotional.rawContent)
