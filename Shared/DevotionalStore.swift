@@ -42,9 +42,23 @@ final class DevotionalStore {
 
     /// Synchronous read used by the widget. Returns the most recent devotional on or before today.
     func todaysDevotional() -> ParsedDevotional? {
+        devotional(for: Date())
+    }
+
+    /// Returns the most recent devotional on or before the given reference date.
+    /// Used by the widget to populate one entry per calendar day.
+    func devotional(for referenceDate: Date) -> ParsedDevotional? {
         guard let devotionals = loadCachedDevotionals() else { return nil }
-        guard let bestMatch = findMostRecentDevotionalOnOrBeforeToday(in: devotionals) else { return nil }
+        guard let bestMatch = findMostRecentDevotionalOnOrBeforeToday(in: devotionals, referenceDate: referenceDate) else { return nil }
         return DevotionalParser.buildParsedDevotional(from: bestMatch)
+    }
+
+    /// Returns all cached devotionals, parsed and sorted by date ascending.
+    func allCachedDevotionals() -> [ParsedDevotional] {
+        guard let devotionals = loadCachedDevotionals() else { return [] }
+        return devotionals
+            .sorted { $0.date < $1.date }
+            .map { DevotionalParser.buildParsedDevotional(from: $0) }
     }
 
     // MARK: - Cache management
@@ -81,14 +95,15 @@ final class DevotionalStore {
 
     // MARK: - Date resolution
 
-    /// Walks backwards up to 7 days to find the most recent entry on or before today.
+    /// Walks backwards up to 7 days from `referenceDate` to find the most recent available entry.
     /// Ensures that weekends or missing dates fall back to the last known entry (e.g. Friday on Monday).
-    func findMostRecentDevotionalOnOrBeforeToday(in devotionals: [Devotional]) -> Devotional? {
+    /// Defaults to today when no `referenceDate` is supplied (preserves existing call sites and tests).
+    func findMostRecentDevotionalOnOrBeforeToday(in devotionals: [Devotional], referenceDate: Date = Date()) -> Devotional? {
         let calendar = Calendar.current
-        let startOfToday = calendar.startOfDay(for: Date())
+        let startOfReferenceDay = calendar.startOfDay(for: referenceDate)
 
         for daysBack in 0...DevotionalStore.maximumDaysToLookBack {
-            guard let targetDate = calendar.date(byAdding: .day, value: -daysBack, to: startOfToday) else { continue }
+            guard let targetDate = calendar.date(byAdding: .day, value: -daysBack, to: startOfReferenceDay) else { continue }
             let targetDateString = dateString(for: targetDate)
             if let match = devotionals.first(where: { $0.date == targetDateString }) {
                 return match

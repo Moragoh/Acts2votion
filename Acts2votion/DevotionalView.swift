@@ -13,7 +13,7 @@ struct DevotionalView: View {
     var body: some View {
         content
             .task {
-                await viewModel.loadTodaysDevotional()
+                await viewModel.loadDevotionals()
             }
     }
 
@@ -28,40 +28,61 @@ struct DevotionalView: View {
                 .font(.custom("Georgia", size: 15))
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        case .loaded(let devotional):
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 0) {
-                    todaysDateLabel
-                        .padding(.bottom, 16)
-
-                    Text(devotional.verses)
-                        .font(.custom("Georgia", size: 20))
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.primary)
-                        .padding(.bottom, 10)
-
-                    Divider()
-                        .padding(.bottom, 10)
-
-                    if isMemoryVerse(devotional) {
-                        memoryVerseBody(devotional.rawContent)
-                    } else {
-                        discussionSections(devotional.sections)
-                    }
+        case .loaded(let devotionals):
+            TabView(selection: $viewModel.selectedDateID) {
+                ForEach(devotionals) { devotional in
+                    devotionalPage(devotional)
+                        .tag(devotional.date)
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 32)
             }
+            .tabViewStyle(.page(indexDisplayMode: .never))
         }
     }
 
-    private var todaysDateLabel: some View {
-        Text(Date.now, format: .dateTime.month(.wide).day().year())
+    private func devotionalPage(_ devotional: ParsedDevotional) -> some View {
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: 0) {
+                dateLabel(for: devotional.date)
+                    .padding(.bottom, 16)
+
+                Text(devotional.displayVerses)
+                    .font(.custom("Georgia", size: 20))
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.primary)
+                    .padding(.bottom, 10)
+
+                Divider()
+                    .padding(.bottom, 10)
+
+                if isMemoryVerse(devotional) {
+                    memoryVerseBody(devotional.rawContent)
+                } else {
+                    discussionSections(devotional.sections)
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 32)
+        }
+    }
+
+    private func dateLabel(for dateString: String) -> some View {
+        Text(formattedDate(dateString))
             .font(.custom("Georgia", size: 12))
             .fontWeight(.regular)
             .foregroundStyle(.secondary)
             .textCase(.uppercase)
             .kerning(0.8)
+            .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private func formattedDate(_ isoDateString: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        guard let date = formatter.date(from: isoDateString) else { return isoDateString }
+        let displayFormatter = DateFormatter()
+        displayFormatter.dateFormat = "MMMM d, yyyy"
+        displayFormatter.timeZone = TimeZone(identifier: "UTC")
+        return displayFormatter.string(from: date)
     }
 
     private func memoryVerseBody(_ rawContent: String) -> some View {

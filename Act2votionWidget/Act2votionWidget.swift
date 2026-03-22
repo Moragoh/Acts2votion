@@ -8,51 +8,93 @@
 import WidgetKit
 import SwiftUI
 
-struct Provider: TimelineProvider {
-    func placeholder(in context: Context) -> SimpleEntry {
-        SimpleEntry(date: Date(), emoji: "😀")
+struct DevotionalEntry: TimelineEntry {
+    let date: Date
+    let bookName: String
+    let reference: String
+    let isEmpty: Bool
+}
+
+struct DevotionalTimelineProvider: TimelineProvider {
+    func placeholder(in context: Context) -> DevotionalEntry {
+        DevotionalEntry(date: Date(), bookName: "John", reference: "8:1-11", isEmpty: false)
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (SimpleEntry) -> ()) {
-        let entry = SimpleEntry(date: Date(), emoji: "😀")
-        completion(entry)
+    func getSnapshot(in context: Context, completion: @escaping (DevotionalEntry) -> Void) {
+        completion(makeEntry(forDate: Date()))
     }
 
-    func getTimeline(in context: Context, completion: @escaping (Timeline<Entry>) -> ()) {
-        var entries: [SimpleEntry] = []
-
-        // Generate a timeline consisting of five entries an hour apart, starting from the current date.
-        let currentDate = Date()
-        for hourOffset in 0 ..< 5 {
-            let entryDate = Calendar.current.date(byAdding: .hour, value: hourOffset, to: currentDate)!
-            let entry = SimpleEntry(date: entryDate, emoji: "😀")
-            entries.append(entry)
-        }
-
-        let timeline = Timeline(entries: entries, policy: .atEnd)
+    func getTimeline(in context: Context, completion: @escaping (Timeline<DevotionalEntry>) -> Void) {
+        let entries = buildDailyEntries(forNextDays: 7)
+        let refreshDate = nextFourAMEST()
+        let timeline = Timeline(entries: entries, policy: .after(refreshDate))
         completion(timeline)
     }
 
-//    func relevances() async -> WidgetRelevances<Void> {
-//        // Generate a list containing the contexts this widget is relevant in.
-//    }
+    /// Creates one entry per calendar day for the next `numberOfDays` days.
+    /// Each entry's `date` is anchored to midnight of that day so WidgetKit advances
+    /// the displayed date at midnight rather than waiting for the next 4 AM refresh.
+    private func buildDailyEntries(forNextDays numberOfDays: Int) -> [DevotionalEntry] {
+        let calendar = Calendar.current
+        let todayMidnight = calendar.startOfDay(for: Date())
+
+        return (0..<numberOfDays).compactMap { dayOffset in
+            guard let dayMidnight = calendar.date(byAdding: .day, value: dayOffset, to: todayMidnight) else { return nil }
+            return makeEntry(forDate: dayMidnight)
+        }
+    }
+
+    private func makeEntry(forDate date: Date) -> DevotionalEntry {
+        if let devotional = DevotionalStore.shared.devotional(for: date) {
+            let components = devotional.verseComponents
+            return DevotionalEntry(date: date, bookName: components.bookName, reference: components.reference, isEmpty: false)
+        }
+        return DevotionalEntry(date: date, bookName: "", reference: "", isEmpty: true)
+    }
+
+    private func nextFourAMEST() -> Date {
+        var calendar = Calendar.current
+        calendar.timeZone = TimeZone(identifier: "America/New_York")!
+        let now = Date()
+        var components = calendar.dateComponents([.year, .month, .day], from: now)
+        components.hour = 4
+        components.minute = 0
+        components.second = 0
+        guard var candidate = calendar.date(from: components) else { return now }
+        if candidate <= now {
+            candidate = calendar.date(byAdding: .day, value: 1, to: candidate) ?? candidate
+        }
+        return candidate
+    }
 }
 
-struct SimpleEntry: TimelineEntry {
-    let date: Date
-    let emoji: String
-}
-
-struct Act2votionWidgetEntryView : View {
-    var entry: Provider.Entry
+struct Act2votionWidgetEntryView: View {
+    var entry: DevotionalEntry
 
     var body: some View {
-        VStack {
-            Text("Time:")
-            Text(entry.date, style: .time)
-
-            Text("Emoji:")
-            Text(entry.emoji)
+        if entry.isEmpty {
+            Text("Open app to load")
+                .font(.custom("Georgia", size: 13))
+                .foregroundStyle(.secondary)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(entry.date, style: .date)
+                    .font(.custom("Georgia", size: 13))
+                    .foregroundStyle(.secondary)
+                Spacer().frame(maxHeight: 16)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.bookName)
+                        .font(.custom("Georgia", size: 17))
+                        .foregroundStyle(.primary)
+                    Text(entry.reference)
+                        .font(.custom("Georgia-Bold", size: 60))
+                        .foregroundStyle(.primary)
+                        .minimumScaleFactor(0.4)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .padding(12)
         }
     }
 }
@@ -61,24 +103,18 @@ struct Act2votionWidget: Widget {
     let kind: String = "Act2votionWidget"
 
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: Provider()) { entry in
-            if #available(iOS 17.0, *) {
-                Act2votionWidgetEntryView(entry: entry)
-                    .containerBackground(.fill.tertiary, for: .widget)
-            } else {
-                Act2votionWidgetEntryView(entry: entry)
-                    .padding()
-                    .background()
-            }
+        StaticConfiguration(kind: kind, provider: DevotionalTimelineProvider()) { entry in
+            Act2votionWidgetEntryView(entry: entry)
+                .containerBackground(.background, for: .widget)
         }
-        .configurationDisplayName("My Widget")
-        .description("This is an example widget.")
+        .configurationDisplayName("Today's Devotional")
+        .description("Shows today's devotional book and passage.")
+        .supportedFamilies([.systemSmall])
     }
 }
 
 #Preview(as: .systemSmall) {
     Act2votionWidget()
 } timeline: {
-    SimpleEntry(date: .now, emoji: "😀")
-    SimpleEntry(date: .now, emoji: "🤩")
+    DevotionalEntry(date: .now, bookName: "John", reference: "8:1-11", isEmpty: false)
 }

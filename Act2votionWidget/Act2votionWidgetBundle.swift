@@ -12,6 +12,5 @@ import SwiftUI
 struct Act2votionWidgetBundle: WidgetBundle {
     var body: some Widget {
         Act2votionWidget()
-        Act2votionWidgetLiveActivity()
     }
 }

@@ -8,7 +8,7 @@ Make sure the app follows the MVVM architecture
 
 **Target:** iOS 17+
 **Bundle:** `com.moragoh.act2votion`
-**App Group:** `group.com.moragoh.act2votion` _(see Known Bugs below)_
+**App Group:** `group.com.moragoh.act2votion`
 
 ---
 
@@ -17,38 +17,28 @@ Make sure the app follows the MVVM architecture
 ```
 Acts2votion/
 │
-├── Shared/                               ← NEW GROUP (added to both targets)
-│   ├── Devotional.swift                  ← NEW: Codable raw model + ParsedDevotional + ContentSection
-│   ├── DevotionalParser.swift            ← NEW: content string → ParsedDevotional
-│   └── DevotionalStore.swift             ← NEW: fetch, cache, read from App Group container
+├── Shared/                               ← compiled into both targets
+│   ├── Devotional.swift                  ← Codable raw model + ParsedDevotional + ContentSection + VerseComponents
+│   ├── DevotionalParser.swift            ← content string → [ContentSection]
+│   └── DevotionalStore.swift             ← fetch, cache, read from App Group container
 │
 ├── Acts2votion/                          (Main app target)
-│   ├── Acts2votionApp.swift              ← MODIFIED: remove SwiftData, add fetch-on-launch
-│   ├── ContentView.swift                 ← MODIFIED: replaced entirely with DevotionalView
-│   ├── DevotionalView.swift              ← NEW: main app scroll view
-│   ├── Acts2votion.entitlements          (existing — App Group already declared)
-│   └── Assets.xcassets/
+│   ├── Acts2votionApp.swift              ← clean entry point, no SwiftData
+│   ├── ContentView.swift                 ← thin wrapper around DevotionalView
+│   ├── DevotionalView.swift              ← paging TabView + per-page ScrollView
+│   ├── DevotionalViewModel.swift         ← @Observable, ViewState, fetch on load
+│   └── Acts2votion.entitlements          ← App Group declared
 │
 ├── Act2votionWidget/                     (Widget extension target)
-│   ├── Act2votionWidget.swift            ← MODIFIED: real StaticConfiguration, 3 sizes
-│   ├── Act2votionWidgetBundle.swift      ← MODIFIED: remove LiveActivity registration
-│   ├── DevotionalEntry.swift             ← NEW: TimelineEntry with ParsedDevotional?
-│   ├── DevotionalProvider.swift          ← NEW: TimelineProvider, 4 AM refresh
-│   ├── DevotionalWidgetView.swift        ← NEW: views for small / medium / large
+│   ├── Act2votionWidget.swift            ← DevotionalEntry + DevotionalTimelineProvider + Act2votionWidgetEntryView + Act2votionWidget
+│   ├── Act2votionWidgetBundle.swift      ← registers Act2votionWidget only
+│   ├── Act2votionWidget.entitlements     ← App Group declared
 │   └── Assets.xcassets/
 │
 ├── Acts2votionTests/
 ├── Acts2votionUITests/
 └── agent_files/
 ```
-
-**Files changed summary:**
-
-- **New:** 7 (`Shared/Devotional.swift`, `Shared/DevotionalParser.swift`, `Shared/DevotionalStore.swift`, `Acts2votion/DevotionalView.swift`, `Act2votionWidget/DevotionalEntry.swift`, `Act2votionWidget/DevotionalProvider.swift`, `Act2votionWidget/DevotionalWidgetView.swift`)
-- **Modified:** 4 (`Acts2votionApp.swift`, `ContentView.swift`, `Act2votionWidget.swift`, `Act2votionWidgetBundle.swift`)
-- **Deleted:** 2 (`Acts2votion/Item.swift`, `Act2votionWidget/Act2votionWidgetLiveActivity.swift`)
-
-> The `Shared/` folder must be created as a new Xcode group with all three files added to **both** the main app target and the widget extension target.
 
 ---
 
@@ -77,7 +67,8 @@ struct ContentSection {
 ### `ParsedDevotional` — ready-to-display model
 
 ```swift
-struct ParsedDevotional {
+struct ParsedDevotional: Identifiable {
+    var id: String { date }
     let date: String
     let type: String              // "bible_text" | "memory_verse"
     let verses: String
@@ -85,6 +76,23 @@ struct ParsedDevotional {
     let rawContent: String          // kept for memory_verse plain display
 }
 ```
+
+`Identifiable` conformance uses `date` as the stable ID, enabling `ForEach` in the paging `TabView`.
+
+### `VerseComponents` + `verseComponents` extension
+
+```swift
+struct VerseComponents {
+    let bookName: String    // e.g. "1 John"
+    let reference: String   // e.g. "4:7-12"
+}
+
+extension ParsedDevotional {
+    var verseComponents: VerseComponents { ... }
+}
+```
+
+Strips the parenthetical translation suffix (`" (ESV)"`) then splits on the last space. Handles multi-word book names like "1 John" and "Song of Solomon".
 
 ---
 
@@ -122,8 +130,7 @@ Output: `[ContentSection]`.
 
 ### Fetch strategy
 
-- On every app launch, `DevotionalStore` checks whether today's devotional is already in the local cache (compare today's date string against cached array).
-- If today's entry is **missing** (or cache does not exist), perform a `URLSession` fetch from `https://moragoh.github.io/Act2votion-server/devotional.json`.
+- On every app open, `DevotionalViewModel.loadDevotionals()` calls `DevotionalStore.fetchIfNeeded()`. Fetches only if today's entry is missing from cache.
 - On success, overwrite the local cache file with the full fetched array.
 - After writing, call `WidgetCenter.shared.reloadAllTimelines()` so the widget picks up the fresh data.
 - On failure, serve from whatever is cached (silent degradation — show last known data).
@@ -137,7 +144,11 @@ The JSON only contains entries for weekdays plus occasional memory verse days. W
 
 ### `todaysDevotional()` — synchronous read (used by widget)
 
-Reads the local cache file, finds the entry closest to today (using the weekend resolution above), parses it, and returns `ParsedDevotional?`. This is called in `getTimeline` and `getSnapshot` — both are off the main thread, so file I/O is fine.
+Reads the local cache file, finds the entry closest to today (using the weekend resolution above), parses it, and returns `ParsedDevotional?`. Called in `getTimeline` and `getSnapshot` — both are off the main thread, so file I/O is fine.
+
+### `allCachedDevotionals()` — full sorted list (used by main app)
+
+Reads the local cache file, parses every entry, and returns `[ParsedDevotional]` sorted by date ascending (ISO-8601 strings sort lexicographically = chronologically). Used by `DevotionalViewModel` to populate the paging `TabView`.
 
 ---
 
@@ -145,78 +156,85 @@ Reads the local cache file, finds the entry closest to today (using the weekend 
 
 ```
 DevotionalView
-  └── ScrollView (vertical)
-        ├── Text(devotional.verses)          — font: .custom("Georgia", …), large, primary color
-        ├── Divider
-        └── ForEach(devotional.sections)
-              ├── Text(section.subheading)   — font: .custom("Georgia", …), semibold, primary color
-              └── ForEach(section.bulletPoints)
-                    └── HStack(alignment: .top)
-                          ├── Text("•")     — leading, fixed width
-                          └── Text(bullet)  — wrapped
+  └── content (ViewBuilder switch on ViewState)
+        ├── .loading  → ProgressView (centered)
+        ├── .empty    → Text("No devotional today") (centered)
+        └── .loaded   → TabView(.page, indexDisplayMode: .never)
+                          └── ForEach(devotionals) → devotionalPage(_:)
+                                └── ScrollView (vertical)
+                                      ├── dateLabel(for:)          — "MMMM d, yyyy", uppercase, kerned, secondary color
+                                      ├── Text(devotional.verses)  — Georgia 20pt, semibold, primary color
+                                      ├── Divider
+                                      └── if memory_verse:
+                                            memoryVerseBody         — Georgia 16pt, italic, centered, secondary color
+                                          else:
+                                            discussionSections
+                                              └── ForEach(sections) → sectionView
+                                                    ├── Text(subheading) — Georgia 15pt, semibold
+                                                    └── ForEach(bulletPoints) → bulletPointRow
+                                                          └── HStack(alignment: .top)
+                                                                ├── Text("•") — fixed width 10pt
+                                                                └── Text(bullet) — wrapped
 ```
 
-- Single `ScrollView` — no `NavigationView`, no tabs, no lists.
-- Font: `Georgia` (system serif available on all iOS). This is the closest system font to Times New Roman.
-- All colors are SwiftUI semantic colors (`Color.primary`, `Color.secondary`, `Color.background`) — zero custom color definitions. Dark/light mode is handled automatically by the system.
-- Loading/error states: a simple centered `Text("Loading…")` or `Text("No devotional today")` placeholder.
+- Swiping left/right pages through all cached devotionals; vertical scroll works within each page.
+- `TabView` selection is bound to `DevotionalViewModel.selectedDateID` — app opens on today's entry (or nearest lookback).
+- Bounces at first/last cached entry; no crash on edge swipe.
+- Font: `Georgia` (system serif available on all iOS).
+- All colors are SwiftUI semantic colors (`Color.primary`, `Color.secondary`, `.tertiary`) — zero custom color definitions. Dark/light mode is handled automatically by the system.
 
 ---
 
-## Widget Implementation
+## Widget Implementation (`Act2votionWidget/Act2votionWidget.swift`)
 
-### `DevotionalEntry` (`Act2votionWidget/DevotionalEntry.swift`)
+All widget components are in a single file.
+
+### `DevotionalEntry`
 
 ```swift
 struct DevotionalEntry: TimelineEntry {
     let date: Date
-    let devotional: ParsedDevotional?   // nil → show placeholder
+    let bookName: String    // e.g. "John"
+    let reference: String   // e.g. "8:1-11"
+    let isEmpty: Bool       // true when cache is empty
 }
 ```
 
-### `DevotionalProvider` (`Act2votionWidget/DevotionalProvider.swift`)
+### `DevotionalTimelineProvider`
 
-Conforms to `TimelineProvider`. Reads from the shared cache via `DevotionalStore.todaysDevotional()`.
+Conforms to `TimelineProvider`. Reads from the shared cache via `DevotionalStore.shared.todaysDevotional()`, uses `verseComponents` to split the verse string into `bookName` + `reference`.
 
 **`getTimeline` refresh policy:**
-
 - Generate a single entry for `Date()`.
-- Compute the next 4 AM EST: if current time is before 4 AM EST today, use today at 4 AM EST; otherwise use tomorrow at 4 AM EST.
+- Compute next 4 AM EST using `TimeZone(identifier: "America/New_York")` (auto-handles EST/EDT).
 - Return `Timeline(entries: [entry], policy: .after(next4amEST))`.
-- This means WidgetKit will ask for a new timeline once per day at 4 AM EST.
 
-**`placeholder`:** Returns a `DevotionalEntry` with a hardcoded placeholder `ParsedDevotional` (no network call).
+**`placeholder`:** Returns a hardcoded entry with `bookName: "John"`, `reference: "8:1-11"`.
 
-**`getSnapshot`:** Returns `DevotionalEntry` from cache (or placeholder if cache is empty).
+**`getSnapshot`:** Returns a live entry from cache (or empty entry if cache is cold).
 
-### `DevotionalWidgetView` (`Act2votionWidget/DevotionalWidgetView.swift`)
+### `Act2votionWidgetEntryView`
 
-Three layouts driven by `entry.family` via `@Environment(\.widgetFamily)`:
+- Empty state: `"Open app to load"` in Georgia 14pt secondary.
+- Loaded state: VStack with book name (Georgia-Bold 16pt primary) over reference (Georgia 14pt secondary), leading-aligned, full-frame.
 
-| Size           | Content                                                                                      |
-| -------------- | -------------------------------------------------------------------------------------------- |
-| `systemSmall`  | Verse reference only (`devotional.verses`), centered, serif font                             |
-| `systemMedium` | Verse reference + first subheading + first bullet point, truncated with `lineLimit`          |
-| `systemLarge`  | Verse reference + all sections (subheadings + all bullets), truncated gracefully if overflow |
-
-All three use `.containerBackground(.fill.tertiary, for: .widget)` (iOS 17+).
-
-### `Act2votionWidget` registration (`Act2votionWidget/Act2votionWidget.swift`)
+### `Act2votionWidget` registration
 
 ```swift
 struct Act2votionWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "Act2votionWidget", provider: DevotionalProvider()) { entry in
-            DevotionalWidgetView(entry: entry)
+        StaticConfiguration(kind: "Act2votionWidget", provider: DevotionalTimelineProvider()) { entry in
+            Act2votionWidgetEntryView(entry: entry)
+                .containerBackground(.background, for: .widget)
         }
-        .configurationDisplayName("Acts2votion")
-        .description("Today's devotional verse.")
-        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
+        .configurationDisplayName("Today's Devotional")
+        .description("Shows today's devotional book and passage.")
+        .supportedFamilies([.systemSmall])
     }
 }
 ```
 
-`Act2votionWidgetBundle` registers only `Act2votionWidget()` — the `LiveActivity` registration is removed.
+`Act2votionWidgetBundle` registers only `Act2votionWidget()`.
 
 ---
 
@@ -224,41 +242,26 @@ struct Act2votionWidget: Widget {
 
 **The app is the sole network fetcher.** The widget only reads from the shared cache — it never makes network calls.
 
-**Network fetch triggers:**
+**Network fetch triggers (current):**
 
-1. **App launch** → `Acts2votionApp.onAppear` calls `DevotionalStore.fetchIfNeeded()`. Fetches only if today's entry is missing from cache.
-2. **4 AM EST daily** → `BGAppRefreshTask` calls `DevotionalStore.fetchIfNeeded()`. Wakes the app in the background to pull fresh data even if the user never opens the app.
+1. **App open** → `DevotionalViewModel.loadDevotionals()` calls `DevotionalStore.fetchIfNeeded()`. Fetches only if today's entry is missing from cache.
+
+**Network fetch triggers (planned):**
+
+2. **4 AM EST daily** → `BGAppRefreshTask` calls `DevotionalStore.fetchIfNeeded()`. Wakes the app in the background to pull fresh data even if the user never opens the app. _(Not yet implemented.)_
 
 **Widget refresh triggers:**
 
 1. **After any successful fetch** → `WidgetCenter.shared.reloadAllTimelines()` is called, prompting WidgetKit to immediately request a new timeline and redraw with fresh cache data.
-2. **4 AM EST** → WidgetKit timeline policy (`.after(next4amEST)`) causes `getTimeline` to be called. `DevotionalProvider` reads from the shared cache (which `BGAppRefreshTask` has already updated) and returns a new timeline.
+2. **4 AM EST** → WidgetKit timeline policy (`.after(next4amEST)`) causes `getTimeline` to be called. `DevotionalTimelineProvider` reads from the shared cache and returns a new timeline.
 
 **Throttling note:** `reloadAllTimelines()` is only called when a fetch actually writes new data — at most once per day — so it stays well within iOS's daily widget reload budget.
-
-**Result:** Widget is guaranteed to show fresh content by 4 AM daily, and also updates immediately when the user opens the app.
 
 ---
 
 ## Dark / Light Mode
 
-- All SwiftUI color tokens used are semantic: `Color.primary`, `Color.secondary`, `.background`, `.fill.tertiary`.
+- All SwiftUI color tokens used are semantic: `Color.primary`, `Color.secondary`, `.background`.
 - No custom `Color` assets are defined.
 - No explicit `colorScheme` environment checks anywhere.
 - The system handles all switching automatically. Zero additional code needed.
-
----
-
-## Known Bug
-
-**Trailing whitespace in entitlements App Group ID**
-
-In `Acts2votion/Acts2votion.entitlements`, the App Group identifier has trailing spaces:
-
-```xml
-<string>group.com.moragoh.act2votion          </string>
-```
-
-The widget extension's entitlements file (if/when created) must use the **exact same string including trailing spaces**, or the shared container lookup will silently fail and both targets will read from separate sandboxed containers. The fix is to strip the trailing whitespace from the main app entitlements and ensure the widget entitlements file uses the clean string `group.com.moragoh.act2votion`.
-
-**Action required before coding:** Fix this in `Acts2votion.entitlements` and ensure the widget extension entitlements file (to be created) uses `group.com.moragoh.act2votion` with no extra whitespace.
