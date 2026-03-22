@@ -159,26 +159,38 @@ DevotionalView
   └── content (ViewBuilder switch on ViewState)
         ├── .loading  → ProgressView (centered)
         ├── .empty    → Text("No devotional today") (centered)
-        └── .loaded   → TabView(.page, indexDisplayMode: .never)
-                          └── ForEach(devotionals) → devotionalPage(_:)
-                                └── ScrollView (vertical)
-                                      ├── dateLabel(for:)          — "MMMM d, yyyy", uppercase, kerned, secondary color
-                                      ├── Text(devotional.verses)  — Georgia 20pt, semibold, primary color
-                                      ├── Divider
-                                      └── if memory_verse:
-                                            memoryVerseBody         — Georgia 16pt, italic, centered, secondary color
-                                          else:
-                                            discussionSections
-                                              └── ForEach(sections) → sectionView
-                                                    ├── Text(subheading) — Georgia 15pt, semibold
-                                                    └── ForEach(bulletPoints) → bulletPointRow
-                                                          └── HStack(alignment: .top)
-                                                                ├── Text("•") — fixed width 10pt
-                                                                └── Text(bullet) — wrapped
+        └── .loaded   → VStack
+                          ├── navigationHeader
+                          │     └── ZStack
+                          │           ├── Text(formattedDate) — Georgia 12pt, uppercase, kerned, secondary
+                          │           └── HStack
+                          │                 ├── hamburgerButton  — SF Symbol "line.3.horizontal", 16pt
+                          │                 └── todayButton (hidden when isOnToday)
+                          │                       └── HStack: [← ]"Today"[ →] — Georgia 12pt secondary
+                          │                             arrow.left prepended when today is behind current page
+                          │                             arrow.right appended when today is ahead of current page
+                          └── ZStack
+                                ├── TabView(.page, indexDisplayMode: .never)
+                                │     └── ForEach(devotionals) → devotionalPage(_:)
+                                │           └── ScrollView (vertical)
+                                │                 ├── Text(devotional.verses)  — Georgia 20pt, semibold, primary
+                                │                 ├── Divider
+                                │                 └── if memory_verse:
+                                │                       memoryVerseBody    — Georgia 16pt, italic, centered, secondary
+                                │                     else:
+                                │                       discussionSections
+                                │                         └── ForEach(sections) → sectionView
+                                │                               ├── Text(subheading) — Georgia 15pt, semibold
+                                │                               └── ForEach(bulletPoints) → bulletPointRow
+                                │                                     └── HStack(alignment: .top)
+                                │                                           ├── Text("•") — fixed width 10pt
+                                │                                           └── Text(bullet) — wrapped
+                                └── SideMenuOverlay
 ```
 
 - Swiping left/right pages through all cached devotionals; vertical scroll works within each page.
 - `TabView` selection is bound to `DevotionalViewModel.selectedDateID` — app opens on today's entry (or nearest lookback).
+- Navigation header contains a Today button (right side) that is hidden when already on today's page. Arrow direction is contextual: `← Today` when the current page is ahead of today, `Today →` when behind. Tapping jumps directly to today's entry.
 - Bounces at first/last cached entry; no crash on edge swipe.
 - Font: `Georgia` (system serif available on all iOS).
 - All colors are SwiftUI semantic colors (`Color.primary`, `Color.secondary`, `.tertiary`) — zero custom color definitions. Dark/light mode is handled automatically by the system.

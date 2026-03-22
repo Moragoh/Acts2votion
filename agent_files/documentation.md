@@ -37,7 +37,10 @@ Thin wrapper that renders `DevotionalView()`.
 
 #### `DevotionalView.swift`
 Paging `TabView` over all cached devotionals. Per-page vertical `ScrollView` driven by `DevotionalViewModel`.
-- Date label: uppercase kerned Georgia 12pt secondary
+- Navigation header: ZStack with centered date label, hamburger button on left, and conditional Today button on right
+  - Today button hidden when `viewModel.isOnToday`; shows `← Today` when current page is ahead of today, `Today →` when behind; tapping calls `viewModel.goToToday()`
+  - Date label: uppercase kerned Georgia 12pt secondary
+  - Today button label: Georgia 12pt secondary with matching kerning; SF Symbol arrow (size 10) prepended or appended based on direction
 - Verse header: Georgia 20pt semibold primary
 - Divider separates header from body
 - Memory verse: Georgia 16pt italic secondary centered
@@ -47,7 +50,11 @@ Paging `TabView` over all cached devotionals. Per-page vertical `ScrollView` dri
 `@Observable @MainActor` class:
 - `viewState: ViewState` — `.loading`, `.loaded([ParsedDevotional])`, `.empty`
 - `selectedDateID: String` — bound to TabView selection; seeded with today's date (or nearest lookback) by `loadDevotionals()`
-- `loadDevotionals()` — calls `fetchIfNeeded()`, then `allCachedDevotionals()`, seeds selection
+- `todayDateID: String` — stored separately from `selectedDateID`; set once in `loadDevotionals()` and never changes during a session; used as the stable reference for "today"
+- `isOnToday: Bool` — computed; true when `selectedDateID == todayDateID`; drives Today button visibility
+- `todayIsAhead: Bool` — computed; true when `selectedDateID < todayDateID` (ISO strings sort lexicographically); drives Today button arrow direction
+- `goToToday()` — sets `selectedDateID = todayDateID`; called by the Today button
+- `loadDevotionals()` — calls `fetchIfNeeded()`, then `allCachedDevotionals()`, seeds both `todayDateID` and `selectedDateID`
 
 #### `Acts2votion/Acts2votion.entitlements`
 App Group `group.com.moragoh.act2votion` declared. No trailing whitespace issues.

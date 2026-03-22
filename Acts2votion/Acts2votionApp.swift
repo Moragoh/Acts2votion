@@ -13,5 +13,8 @@ struct Acts2votionApp: App {
         WindowGroup {
             ContentView()
         }
+        #if os(macOS)
+        .defaultSize(width: 1200, height: 900)
+        #endif
     }
 }

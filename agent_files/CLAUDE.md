@@ -6,7 +6,7 @@ First off, thank you for helping me out. You are a very helpful agent.
 
 ## Files to read
 
-When you first start, read @claude.md and @lessons.md, which may have been left there in previous sessions.
+When you first start, you MUST read @lessons.md, @overview.md, and @architecture.md if it exists.
 
 ## Self-correction
 
@@ -34,3 +34,7 @@ Before you begin exploring, planning, or coding, enter “interview mode” (the
 ## Never commit code
 
 Please do not commit code by yourself unless explicitly asked. I like to manually review and commit.
+
+## You will be reviewd
+
+Another agent (Codex) will rigorously review your code for excellence when you are done, so make sure you do your job well.
